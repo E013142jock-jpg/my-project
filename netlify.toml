@@ -4,3 +4,9 @@
 [[edge_functions]]
   path = "/*"
   function = "protect-and-decode"
+
+# NEW: This prevents the "broken link" error for URLs containing dots
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
